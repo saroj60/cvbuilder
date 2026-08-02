@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e1b4b" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+    <linearGradient id="glow-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#818cf8" />
+      <stop offset="100%" stop-color="#6366f1" />
+    </linearGradient>
+  </defs>
+  <!-- Background -->
+  <rect width="512" height="512" rx="128" fill="url(#bg-grad)" />
+  
+  <!-- Resume Sheet Shadow/Glow -->
+  <rect x="130" y="80" width="252" height="332" rx="20" fill="url(#glow-grad)" opacity="0.3" filter="blur(8px)" />
+  
+  <!-- Resume Sheet Border -->
+  <rect x="133" y="83" width="246" height="326" rx="18" fill="#6366f1" />
+  
+  <!-- Resume Sheet Body -->
+  <rect x="136" y="86" width="240" height="320" rx="16" fill="#ffffff" />
+  
+  <!-- Header elements -->
+  <rect x="166" y="126" width="100" height="16" rx="4" fill="#818cf8" />
+  <rect x="166" y="154" width="60" height="10" rx="3" fill="#cbd5e1" />
+  <rect x="306" y="122" width="40" height="40" rx="8" fill="#e2e8f0" />
+  
+  <rect x="166" y="181" width="180" height="4" rx="2" fill="#e2e8f0" />
+  
+  <!-- Experience section -->
+  <rect x="166" y="206" width="80" height="12" rx="3" fill="#475569" />
+  <rect x="166" y="228" width="180" height="8" rx="2" fill="#94a3b8" />
+  <rect x="166" y="244" width="140" height="8" rx="2" fill="#cbd5e1" />
+  
+  <!-- Education section -->
+  <rect x="166" y="272" width="60" height="12" rx="3" fill="#475569" />
+  <rect x="166" y="294" width="180" height="8" rx="2" fill="#94a3b8" />
+  <rect x="166" y="310" width="100" height="8" rx="2" fill="#cbd5e1" />
+  
+  <!-- Star / Sparkle AI logo -->
+  <!-- Top Right Sparkle -->
+  <path d="M 356 106 Q 356 122 372 122 Q 356 122 356 138 Q 356 122 340 122 Q 356 122 356 106 Z" fill="#fbbf24" />
+  <path d="M 356 114 Q 356 122 364 122 Q 356 122 356 130 Q 356 122 348 122 Q 356 122 356 114 Z" fill="#ffffff" />
+  
+  <!-- Secondary Sparkle -->
+  <path d="M 376 136 Q 376 142 382 142 Q 376 142 376 148 Q 376 142 370 142 Q 376 142 376 136 Z" fill="#38bdf8" />
+</svg>

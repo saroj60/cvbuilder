@@ -1,0 +1,652 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ==========================================
+// ENUMS
+// ==========================================
+
+enum RoleName {
+  ADMIN
+  RECRUITER
+  EMPLOYER
+  AGENT
+  CANDIDATE
+  AUDITOR
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum MaritalStatus {
+  SINGLE
+  MARRIED
+  DIVORCED
+  WIDOWED
+}
+
+enum Proficiency {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+  FLUENT
+  NATIVE
+}
+
+enum DemandStatus {
+  DRAFT
+  ACTIVE
+  FULFILLED
+  CANCELLED
+}
+
+enum CandidateStatus {
+  NEW
+  SCREENED
+  INTERVIEW_SCHEDULED
+  SELECTED
+  MEDICAL_PENDING
+  VISA_PROCESSING
+  MOFA_SUBMITTED
+  DEPLOYED
+  REJECTED
+}
+
+enum InterviewResult {
+  PENDING
+  PASSED
+  FAILED
+  RESCHEDULED
+  CANCELLED
+}
+
+enum MedicalStatus {
+  PENDING
+  FIT
+  UNFIT
+  REEXAMINE
+}
+
+enum VisaStatus {
+  PENDING
+  APPLIED
+  APPROVED
+  REJECTED
+  STAMPED
+}
+
+enum MOFAStatus {
+  PENDING
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+enum DeploymentStatus {
+  PENDING
+  TICKET_ISSUED
+  DEPARTED
+  ARRIVED
+  CANCELLED
+}
+
+enum DocumentType {
+  PASSPORT
+  CITIZENSHIP
+  MEDICAL
+  POLICE_CLEARANCE
+  CERTIFICATE
+  PHOTO
+  RESUME
+  VISA
+  CONTRACT
+  OTHER
+}
+
+enum NotificationType {
+  SYSTEM
+  INTERVIEW
+  VISA
+  MEDICAL
+  DEPLOYMENT
+  GENERAL
+}
+
+// ==========================================
+// RBAC & USER MANAGEMENT
+// ==========================================
+
+model Role {
+  id          String   @id @default(uuid())
+  name        RoleName @unique
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users       User[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  module      String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  name      String
+  phone     String?
+  roleId    String
+  isActive  Boolean  @default(true)
+  avatarUrl String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  role Role @relation(fields: [roleId], references: [id])
+
+  createdCandidates   Candidate[]      @relation("CandidateCreator")
+  createdDemands      EmployerDemand[] @relation("DemandCreator")
+  assignedDemands     EmployerDemand[] @relation("AssignedRecruiter")
+  conductedInterviews Interview[]      @relation("Interviewer")
+  notifications       Notification[]
+  auditLogs           AuditLog[]
+  resumes             Resume[]
+
+  @@index([email])
+  @@index([roleId])
+  @@map("users")
+}
+
+// ==========================================
+// EMPLOYER & DEMANDS
+// ==========================================
+
+model Employer {
+  id            String   @id @default(uuid())
+  companyName   String
+  companyEmail  String   @unique
+  companyPhone  String
+  country       String
+  address       String?
+  contactPerson String
+  website       String?
+  isVerified    Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  demands EmployerDemand[]
+
+  @@index([companyEmail])
+  @@map("employers")
+}
+
+model EmployerDemand {
+  id                  String       @id @default(uuid())
+  demandNumber        String       @unique
+  employerId          String
+  createdById         String
+  assignedRecruiterId String?
+  title               String
+  description         String
+  quantityRequired    Int
+  salary              Decimal      @db.Decimal(10, 2)
+  currency            String       @default("USD")
+  benefits            String[]     @default([])
+  contractPeriod      String       @default("2 Years")
+  closingDate         DateTime?
+  status              DemandStatus @default(ACTIVE)
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  employer          Employer @relation(fields: [employerId], references: [id], onDelete: Cascade)
+  createdBy         User     @relation("DemandCreator", fields: [createdById], references: [id])
+  assignedRecruiter User?    @relation("AssignedRecruiter", fields: [assignedRecruiterId], references: [id], onDelete: SetNull)
+
+  candidates Candidate[]
+  interviews Interview[]
+
+  @@index([employerId])
+  @@index([demandNumber])
+  @@index([status])
+  @@map("employer_demands")
+}
+
+// ==========================================
+// CANDIDATE PROFILE & DETAILS
+// ==========================================
+
+model Candidate {
+  id               String          @id @default(uuid())
+  candidateNumber  String          @unique
+  firstName        String
+  lastName         String
+  email            String          @unique
+  phone            String
+  gender           Gender
+  dob              DateTime
+  nationality      String
+  maritalStatus    MaritalStatus   @default(SINGLE)
+  address          String?
+  createdById      String
+  employerDemandId String?
+  currentStatus    CandidateStatus @default(NEW)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  createdBy User            @relation("CandidateCreator", fields: [createdById], references: [id])
+  demand    EmployerDemand? @relation(fields: [employerDemandId], references: [id], onDelete: SetNull)
+
+  education        Education[]
+  experience       Experience[]
+  skills           CandidateSkill[]
+  languages        CandidateLanguage[]
+  certificates     Certificate[]
+  passport         Passport?
+  medical          Medical?
+  visa             Visa?
+  mofa             MOFA?
+  deployment       Deployment?
+  interviews       Interview[]
+  documents        Document[]
+  generatedResumes GeneratedResume[]
+
+  @@index([email])
+  @@index([candidateNumber])
+  @@index([currentStatus])
+  @@map("candidates")
+}
+
+model Education {
+  id           String    @id @default(uuid())
+  candidateId  String
+  degree       String
+  fieldOfStudy String
+  institution  String
+  location     String?
+  startDate    DateTime
+  endDate      DateTime?
+  isCurrent    Boolean   @default(false)
+  grade        String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId])
+  @@map("educations")
+}
+
+model Experience {
+  id              String    @id @default(uuid())
+  candidateId     String
+  companyName     String
+  jobTitle        String
+  location        String?
+  startDate       DateTime
+  endDate         DateTime?
+  isCurrent       Boolean   @default(false)
+  responsibilities String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId])
+  @@map("experiences")
+}
+
+model Skill {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  category  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  candidates CandidateSkill[]
+
+  @@index([name])
+  @@map("skills")
+}
+
+model CandidateSkill {
+  candidateId     String
+  skillId         String
+  yearsExperience Int         @default(1)
+  proficiency     Proficiency @default(INTERMEDIATE)
+
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  skill     Skill     @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@id([candidateId, skillId])
+  @@map("candidate_skills")
+}
+
+model Language {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  code      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  candidates CandidateLanguage[]
+
+  @@map("languages")
+}
+
+model CandidateLanguage {
+  candidateId String
+  languageId  String
+  proficiency Proficiency @default(INTERMEDIATE)
+
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  language  Language  @relation(fields: [languageId], references: [id], onDelete: Cascade)
+
+  @@id([candidateId, languageId])
+  @@map("candidate_languages")
+}
+
+model Certificate {
+  id                  String    @id @default(uuid())
+  candidateId         String
+  title               String
+  issuingOrganization String
+  issueDate           DateTime
+  expiryDate          DateTime?
+  credentialId        String?
+  credentialUrl       String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId])
+  @@map("certificates")
+}
+
+// ==========================================
+// RECRUITMENT WORKFLOW & COMPLIANCE
+// ==========================================
+
+model Passport {
+  id             String   @id @default(uuid())
+  candidateId    String   @unique
+  passportNumber String   @unique
+  placeOfIssue   String
+  issueDate      DateTime
+  expiryDate     DateTime
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([passportNumber])
+  @@map("passports")
+}
+
+model Medical {
+  id          String        @id @default(uuid())
+  candidateId String        @unique
+  clinicName  String
+  reportNo    String        @unique
+  testDate    DateTime
+  expiryDate  DateTime?
+  status      MedicalStatus @default(PENDING)
+  remarks     String?
+  documentUrl String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@map("medicals")
+}
+
+model Visa {
+  id          String     @id @default(uuid())
+  candidateId String     @unique
+  visaNumber  String?
+  visaType    String     @default("WORK_VISA")
+  country     String
+  issueDate   DateTime?
+  expiryDate  DateTime?
+  status      VisaStatus @default(PENDING)
+  remarks     String?
+  documentUrl String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@map("visas")
+}
+
+model MOFA {
+  id             String     @id @default(uuid())
+  candidateId    String     @unique
+  mofaNumber     String     @unique
+  submissionDate DateTime
+  approvalDate   DateTime?
+  status         MOFAStatus @default(PENDING)
+  fee            Decimal?   @db.Decimal(10, 2)
+  remarks        String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@map("mofas")
+}
+
+model Deployment {
+  id                 String           @id @default(uuid())
+  candidateId        String           @unique
+  flightNumber       String?
+  airline            String?
+  departureDate      DateTime?
+  arrivalDate        DateTime?
+  destinationCountry String
+  ticketUrl          String?
+  status             DeploymentStatus @default(PENDING)
+  remarks            String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@map("deployments")
+}
+
+model Interview {
+  id            String          @id @default(uuid())
+  candidateId   String
+  demandId      String
+  interviewerId String
+  scheduledAt   DateTime
+  location      String
+  type          String          @default("IN_PERSON")
+  result        InterviewResult @default(PENDING)
+  feedback      String?
+  score         Float?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  candidate   Candidate      @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  demand      EmployerDemand @relation(fields: [demandId], references: [id], onDelete: Cascade)
+  interviewer User           @relation("Interviewer", fields: [interviewerId], references: [id])
+
+  @@index([candidateId])
+  @@index([demandId])
+  @@map("interviews")
+}
+
+model Document {
+  id                 String       @id @default(uuid())
+  candidateId        String?
+  title              String
+  documentType       DocumentType
+  fileUrl            String
+  fileType           String
+  fileSize           Int
+  version            Int          @default(1)
+  previousVersionId  String?
+  isLatest           Boolean      @default(true)
+  uploadedAt         DateTime     @default(now())
+
+  candidate Candidate? @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId])
+  @@index([documentType])
+  @@map("documents")
+}
+
+// ==========================================
+// RESUME TEMPLATES & GENERATION
+// ==========================================
+
+model ResumeTemplate {
+  id              String   @id @default(uuid())
+  name            String   @unique
+  layoutSchema    Json
+  isDefault       Boolean  @default(false)
+  previewImageUrl String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  generatedResumes GeneratedResume[]
+
+  @@map("resume_templates")
+}
+
+model GeneratedResume {
+  id          String   @id @default(uuid())
+  candidateId String
+  templateId  String
+  pdfUrl      String
+  summaryText String?
+  matchScore  Float    @default(0.0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  candidate Candidate      @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  template  ResumeTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId])
+  @@map("generated_resumes")
+}
+
+// ==========================================
+// SYSTEM LOGGING & NOTIFICATIONS
+// ==========================================
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  title     String
+  message   String
+  type      NotificationType @default(GENERAL)
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  action     String
+  entityName String
+  entityId   String?
+  payload    Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([entityName])
+  @@map("audit_logs")
+}
+
+enum ResumeStatus {
+  NEW
+  PENDING
+  SHORTLISTED
+  INTERVIEWED
+  REJECTED
+}
+
+model Job {
+  id          String   @id @default(uuid())
+  title       String
+  description String
+  skills      String[]
+  department  String
+  location    String
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  resumes     Resume[]
+
+  @@map("jobs")
+}
+
+model Resume {
+  id            String       @id @default(uuid())
+  userId        String
+  candidateName String
+  email         String
+  phone         String?
+  summary       String?
+  skills        String[]
+  experienceYrs Int
+  education     String?
+  fileUrl       String?
+  jobId         String?
+  matchScore    Float        @default(0.0)
+  aiFeedback    String?
+  status        ResumeStatus @default(NEW)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  job           Job?         @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("resumes")
+}
