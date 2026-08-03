@@ -1,5 +1,5 @@
 import { prisma, isDbConnected } from '../config/prisma';
-import { DocumentType } from '@prisma/client';
+import { DocumentType } from '../types/enums';
 
 export class DocumentService {
   static async uploadDocument(data: {

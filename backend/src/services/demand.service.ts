@@ -1,5 +1,5 @@
 import { prisma, isDbConnected } from '../config/prisma';
-import { DemandStatus } from '@prisma/client';
+import { DemandStatus } from '../types/enums';
 
 export class DemandService {
   static async createDemand(data: {
@@ -29,7 +29,7 @@ export class DemandService {
         quantityRequired: data.quantityRequired,
         salary: data.salary,
         currency: data.currency || 'USD',
-        benefits: data.benefits || [],
+        benefits: JSON.stringify(data.benefits || []),
         contractPeriod: data.contractPeriod || '2 Years',
         closingDate: data.closingDate ? new Date(data.closingDate) : null,
         status: data.status || 'ACTIVE',
@@ -50,7 +50,7 @@ export class DemandService {
         if (status) where.status = status;
         if (employerId) where.employerId = employerId;
 
-        return await prisma.employerDemand.findMany({
+        const demands = await prisma.employerDemand.findMany({
           where,
           include: {
             employer: {
@@ -65,6 +65,11 @@ export class DemandService {
           },
           orderBy: { createdAt: 'desc' },
         });
+
+        return demands.map(d => ({
+          ...d,
+          benefits: JSON.parse(d.benefits || '[]') as string[]
+        }));
       } catch (e) {}
     }
 
@@ -101,7 +106,10 @@ export class DemandService {
     });
 
     if (!demand) throw new Error('Employer demand not found');
-    return demand;
+    return {
+      ...demand,
+      benefits: JSON.parse(demand.benefits || '[]') as string[]
+    };
   }
 
   static async assignCandidate(demandId: string, candidateId: string) {

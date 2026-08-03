@@ -10,12 +10,20 @@ export class JobService {
   }) {
     if (isDbConnected) {
       try {
-        return await prisma.job.create({
+        const createdJob = await prisma.job.create({
           data: {
             createdById,
-            ...data,
+            title: data.title,
+            description: data.description,
+            skills: JSON.stringify(data.skills),
+            department: data.department,
+            location: data.location,
           },
         });
+        return {
+          ...createdJob,
+          skills: JSON.parse(createdJob.skills || '[]') as string[]
+        };
       } catch (e) {}
     }
 
@@ -30,7 +38,7 @@ export class JobService {
   static async getJobs(createdById: string) {
     if (isDbConnected) {
       try {
-        return await prisma.job.findMany({
+        const jobs = await prisma.job.findMany({
           where: { createdById },
           include: {
             _count: {
@@ -39,6 +47,11 @@ export class JobService {
           },
           orderBy: { createdAt: 'desc' },
         });
+
+        return jobs.map(j => ({
+          ...j,
+          skills: JSON.parse(j.skills || '[]') as string[]
+        }));
       } catch (e) {}
     }
 
@@ -52,7 +65,17 @@ export class JobService {
           where: { id },
           include: { resumes: true },
         });
-        if (job) return job;
+        if (job) {
+          const parsedResumes = (job.resumes || []).map(r => ({
+            ...r,
+            skills: JSON.parse(r.skills || '[]') as string[]
+          }));
+          return {
+            ...job,
+            skills: JSON.parse(job.skills || '[]') as string[],
+            resumes: parsedResumes
+          };
+        }
       } catch (e) {}
     }
 

@@ -2,7 +2,7 @@ import { Response, NextFunction } from 'express';
 import { ResumeService } from '../services/resume.service';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { sendSuccess, sendError } from '../utils/response';
-import { ResumeStatus } from '@prisma/client';
+import { ResumeStatus } from '../types/enums';
 
 export class ResumeController {
   static async createResume(req: AuthenticatedRequest, res: Response, next: NextFunction) {

@@ -1,5 +1,5 @@
 import { prisma, isDbConnected } from '../config/prisma';
-import { MedicalStatus } from '@prisma/client';
+import { MedicalStatus } from '../types/enums';
 
 export class MedicalService {
   static async scheduleOrUpdateMedical(data: {

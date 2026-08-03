@@ -1,6 +1,6 @@
 import { prisma, isDbConnected } from '../config/prisma';
 import { AIService } from './ai.service';
-import { ResumeStatus } from '@prisma/client';
+import { ResumeStatus } from '../types/enums';
 
 export class ResumeService {
   static async createResume(userId: string, data: {
@@ -17,19 +17,19 @@ export class ResumeService {
     let jobSkills: string[] = [];
     if (data.jobId) {
       const job = await prisma.job.findUnique({ where: { id: data.jobId } });
-      if (job) jobSkills = job.skills;
+      if (job) jobSkills = JSON.parse(job.skills || '[]') as string[];
     }
 
     const aiResult = await AIService.analyzeResume(data.summary || '', jobSkills);
 
-    return prisma.resume.create({
+    const createdResume = await prisma.resume.create({
       data: {
         userId,
         candidateName: data.candidateName,
         email: data.email,
         phone: data.phone,
         summary: data.summary,
-        skills: aiResult.extractedSkills.length > 0 ? aiResult.extractedSkills : data.skills,
+        skills: JSON.stringify(aiResult.extractedSkills.length > 0 ? aiResult.extractedSkills : data.skills),
         experienceYrs: data.experienceYrs,
         education: data.education,
         fileUrl: data.fileUrl,
@@ -42,6 +42,17 @@ export class ResumeService {
         job: true,
       },
     });
+
+    const parsedJob = createdResume.job ? {
+      ...createdResume.job,
+      skills: JSON.parse(createdResume.job.skills || '[]') as string[]
+    } : null;
+
+    return {
+      ...createdResume,
+      skills: JSON.parse(createdResume.skills || '[]') as string[],
+      job: parsedJob
+    };
   }
 
   static async getResumes(userId: string, status?: ResumeStatus, search?: string) {
@@ -57,14 +68,26 @@ export class ResumeService {
           where.OR = [
             { candidateName: { contains: search, mode: 'insensitive' } },
             { email: { contains: search, mode: 'insensitive' } },
-            { skills: { hasSome: [search] } },
+            { skills: { contains: search } },
           ];
         }
 
-        return await prisma.resume.findMany({
+        const resumes = await prisma.resume.findMany({
           where,
           include: { job: true },
           orderBy: { createdAt: 'desc' },
+        });
+
+        return resumes.map(r => {
+          const parsedJob = r.job ? {
+            ...r.job,
+            skills: JSON.parse(r.job.skills || '[]') as string[]
+          } : null;
+          return {
+            ...r,
+            skills: JSON.parse(r.skills || '[]') as string[],
+            job: parsedJob
+          };
         });
       } catch (e) {}
     }
@@ -79,7 +102,17 @@ export class ResumeService {
     });
 
     if (!resume) throw new Error('Resume not found');
-    return resume;
+    
+    const parsedJob = resume.job ? {
+      ...resume.job,
+      skills: JSON.parse(resume.job.skills || '[]') as string[]
+    } : null;
+
+    return {
+      ...resume,
+      skills: JSON.parse(resume.skills || '[]') as string[],
+      job: parsedJob
+    };
   }
 
   static async updateResumeStatus(id: string, userId: string, status: ResumeStatus) {

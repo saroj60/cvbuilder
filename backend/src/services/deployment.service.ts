@@ -1,5 +1,5 @@
 import { prisma } from '../config/prisma';
-import { DeploymentStatus } from '@prisma/client';
+import { DeploymentStatus } from '../types/enums';
 
 export class DeploymentService {
   static async createOrUpdateDeployment(data: {

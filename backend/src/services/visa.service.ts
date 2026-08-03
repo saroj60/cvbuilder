@@ -1,5 +1,5 @@
 import { prisma, isDbConnected } from '../config/prisma';
-import { VisaStatus, MOFAStatus } from '@prisma/client';
+import { VisaStatus, MOFAStatus } from '../types/enums';
 
 export class VisaService {
   static async createOrUpdateVisa(data: {
