@@ -1,7 +1,16 @@
 import axios from 'axios';
 
+let baseURL = (import.meta as any).env.VITE_API_URL || '/api/v1';
+
+// Auto-fallback to Hostinger backend in production if baseURL is relative
+if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+  if (baseURL.startsWith('/')) {
+    baseURL = 'https://pink-shark-204791.hostingersite.com/api/v1';
+  }
+}
+
 const api = axios.create({
-  baseURL: (import.meta as any).env.VITE_API_URL || 'http://localhost:5000/api/v1',
+  baseURL,
   headers: {
     'Content-Type': 'application/json',
   },
