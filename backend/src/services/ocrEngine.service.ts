@@ -1,5 +1,6 @@
 import { createWorker, Worker } from 'tesseract.js';
 import fs from 'fs';
+import path from 'path';
 
 export interface PageOcrResult {
   pageIndex: number;
@@ -24,6 +25,8 @@ export class OcrEngineService {
   private async getWorker(): Promise<Worker> {
     if (!this.worker) {
       this.worker = await createWorker('eng', 1, {
+        langPath: path.resolve(__dirname, '../../'),
+        cachePath: path.resolve(__dirname, '../../'),
         logger: (m) => {
           if (process.env.DEBUG_OCR === 'true') {
             console.log(`[Tesseract OCR Engine]`, m.status, m.progress ? `${Math.round(m.progress * 100)}%` : '');

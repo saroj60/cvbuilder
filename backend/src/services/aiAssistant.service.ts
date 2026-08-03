@@ -723,7 +723,7 @@ export class AIAssistantService {
         console.log('⚡ Trying Gemini Vision API...');
         const pureBase64 = base64Image.replace(/^data:image\/\w+;base64,/, '').replace(/^data:application\/pdf;base64,/, '');
         const geminiRes = await axios.post(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${geminiKey.trim()}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey.trim()}`,
           {
             contents: [{
               parts: [

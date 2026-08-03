@@ -9,7 +9,7 @@ export class AIBuilderService {
   ): Promise<string> {
     if (!env.GEMINI_API_KEY) throw new Error("No Gemini API key configured");
 
-    const models = ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'];
+    const models = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'];
     let lastError: any = null;
 
     for (const modelName of models) {
