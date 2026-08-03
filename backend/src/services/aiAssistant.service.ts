@@ -105,7 +105,12 @@ export class AIAssistantService {
 
     if (!ocrText || ocrText.trim().length === 0) return result;
 
-    const text = ocrText.replace(/\r\n/g, '\n');
+    // Remove bilingual month slashes (e.g. "JUN/JUIN" -> "JUN", "MAR/MARS" -> "MAR")
+    let cleanedOcrText = ocrText
+      .replace(/([A-Z]{3})\s*\/\s*[A-Z]+/gi, '$1')
+      .replace(/([A-Z]{3})\/[A-Z]+/gi, '$1');
+
+    const text = cleanedOcrText.replace(/\r\n/g, '\n');
     const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
     const fullText = lines.join(' ');
 
@@ -212,20 +217,10 @@ export class AIAssistantService {
 
     // ======================================================================
     // 2. Text-Based Field Extraction (handles noisy Tesseract OCR output)
-    //    Patterns observed from real OCR:
-    //      "Passport Ho" or "Possport Ho" → Passport No
-    //      "NPL 12149553" → passport number
-    //      "Sumame." or "Surname" → surname line
-    //      "Given Names" → given names
-    //      "Nationality" or "Netioraity" → nationality
-    //      "27.JUN 1999" → DOB
-    //      "06 MAR 2031" → expiry
-    //      "SAPTARI" → place of birth
     // ======================================================================
 
     // -- Passport Number --
     if (!result.passportNumber) {
-      // Look for 8-digit number, or 2 letters + 7 digits (conforming to e-passport and MRP formats)
       const ppPatterns = [
         /(?:passport|possport|possport\s*ho|ho|no|npl)[^A-Z0-9]*([A-Z]{0,2}[0-9]{7,8})/i,
         /\b([A-Z]{0,2}[0-9]{7,8})\b/i,
@@ -239,13 +234,10 @@ export class AIAssistantService {
       }
     }
 
-    // MRZ Name Cleanup logic to strip trailing OCR noise (e.g. "L LLLLLLLL", "K KKKLKKLKK")
     const cleanMrzName = (name: string) => {
       if (!name) return '';
       let words = name.split(/\s+/);
-      // Remove words that are repeating noise (e.g. LLLLL, KKKKK, XXXXX, <<<<<)
       words = words.filter(w => !/^(.)\1{2,}$/.test(w) && !/^[I|L|K|X|<]{3,}$/i.test(w));
-      // Remove trailing single letters or garbage words (like "K", "L", "KL")
       while (words.length > 0) {
         const last = words[words.length - 1];
         if (last.length <= 2 && /^[A-Z]$/i.test(last)) {
@@ -263,7 +255,6 @@ export class AIAssistantService {
 
     // -- Full Name (Surname + Given Names) --
     if (!result.fullName) {
-      // Find where the passport identity details start (look for NEPAL or PASSPORT)
       let detailsStartIndex = 0;
       for (let i = 0; i < lines.length; i++) {
         if (/NEPAL|PASSPORT|REPUBLIC/i.test(lines[i])) {
@@ -279,10 +270,8 @@ export class AIAssistantService {
       for (let i = 0; i < detailsLines.length; i++) {
         const line = detailsLines[i];
         
-        // Surname match (handles "Surname", "Sumame", "Surnames", etc.)
         if (/s[urmn]+ames?/i.test(line)) {
           if (i + 1 < detailsLines.length) {
-            // Look at next line and keep only uppercase words (which represent the actual printed value)
             const nextLineWords = detailsLines[i + 1].split(/[\s|/\\:.-]+/).filter(w => /^[A-Z]{2,30}$/.test(w) && !/GIVEN|NAME|PASSPORT|NEPAL|TYPE/i.test(w));
             if (nextLineWords.length > 0) {
               surname = nextLineWords.join(' ');
@@ -295,11 +284,9 @@ export class AIAssistantService {
           }
         }
         
-        // Given names match (handles "Given Name", "Given Names", etc.)
         if (/given\s*names?/i.test(line)) {
           if (i + 1 < detailsLines.length) {
-            // Look at next line and keep only uppercase words
-            const nextLineWords = detailsLines[i + 1].split(/[\s|/\\:.-]+/).filter(w => /^[A-Z]{2,30}$/.test(w) && !/NATIONALITY|PERSONAL|SEX|MALE|FEMALE/i.test(w));
+            const nextLineWords = detailsLines[i + 1].split(/[\s|/\\:.-]+/).filter(w => /^[A-Z]{2,30}$/.test(w) && !/SURNAME|NAME|PASSPORT|NEPAL|TYPE/i.test(w));
             if (nextLineWords.length > 0) {
               givenNames = nextLineWords.join(' ');
             }
@@ -312,59 +299,29 @@ export class AIAssistantService {
         }
       }
 
-      // If fallback parsed a cleaner, valid name, use it instead of noise-filled MRZ name
-      const fallbackFullName = [givenNames, surname].filter(Boolean).join(' ').trim();
-      if (fallbackFullName.length >= 3) {
-        // If we found both parts of the name on the passport labels (Given Names + Surname),
-        // we always prefer this because it is much more accurate than MRZ OCR which contains noisy chevrons.
-        if (givenNames && surname) {
-          result.fullName = fallbackFullName;
-        } else if (!result.fullName || result.fullName.length > fallbackFullName.length + 5 || result.fullName.includes('LLLL') || result.fullName.includes('KKKK')) {
-          result.fullName = fallbackFullName;
-        }
-      }
-
-      // Last Resort Fallback: Look for ALL CAPS words that look like names if result.fullName is still empty
-      if (!result.fullName) {
-        const nameCandidates = detailsLines.filter(line => {
-          // 1. Reject lines with digits
-          if (/[0-9]/.test(line)) return false;
-          // 2. Reject lines with chevrons
-          if (line.includes('<')) return false;
-          // 3. Reject lines matching exclusion words
-          if (/PASSPORT|NEPAL|REPUBLIC|GOVERNMENT|DEPARTMENT|IMMIGRATION|DOCUMENT|MINISTRY|FOREIGN|AFFAIRS|MACHINE|READABLE|TRAVEL|PAGE|CURRICULUM|VITAE|SURNAME|GIVEN|NAME|DATE|BIRTH|PLACE|ISSUE|EXPIRY|NATIONALITY|AUTHORITY|TYPE|CODE|COUNTRY|HOLDER|PERSONAL|SEX|MALE|FEMALE/i.test(line)) return false;
-          // 4. Clean and verify length/format
-          const cleaned = line.replace(/[^A-Z\s]/ig, '').replace(/\s+/g, ' ').trim();
-          return cleaned.length >= 2 && /^[A-Z\s]+$/.test(cleaned);
-        }).map(line => line.replace(/[^A-Z\s]/ig, '').replace(/\s+/g, ' ').trim());
-
-        if (nameCandidates.length >= 2) {
-          result.fullName = [nameCandidates[1], nameCandidates[0]].filter(Boolean).join(' ').trim();
-        } else if (nameCandidates.length === 1) {
-          result.fullName = nameCandidates[0];
-        }
+      const mrzName = [givenNames, surname].filter(Boolean).join(' ').trim();
+      if (mrzName.length >= 3) {
+        result.fullName = mrzName;
       }
     }
 
+    const months: Record<string, string> = {
+      'JAN': '01', 'JANUARY': '01',
+      'FEB': '02', 'FEBRUARY': '02',
+      'MAR': '03', 'MARCH': '03',
+      'APR': '04', 'APRIL': '04',
+      'MAY': '05',
+      'JUN': '06', 'JUNE': '06',
+      'JUL': '07', 'JULY': '07',
+      'AUG': '08', 'AUGUST': '08',
+      'SEP': '09', 'SEPTEMBER': '09',
+      'OCT': '10', 'OCTOBER': '10',
+      'NOV': '11', 'NOVEMBER': '11',
+      'DEC': '12', 'DECEMBER': '12',
+    };
+
     // -- Date of Birth --
     if (!result.dob) {
-      // Pattern: "27.JUN 1999" or "27 JUN 1999" or "27/06/1999"
-      const months: Record<string, string> = {
-        'JAN': '01', 'JANUARY': '01',
-        'FEB': '02', 'FEBRUARY': '02',
-        'MAR': '03', 'MARCH': '03',
-        'APR': '04', 'APRIL': '04',
-        'MAY': '05',
-        'JUN': '06', 'JUNE': '06',
-        'JUL': '07', 'JULY': '07',
-        'AUG': '08', 'AUGUST': '08',
-        'SEP': '09', 'SEPTEMBER': '09',
-        'OCT': '10', 'OCTOBER': '10',
-        'NOV': '11', 'NOVEMBER': '11',
-        'DEC': '12', 'DECEMBER': '12',
-      };
-
-      // Find dates after "Date of Birth" / "Birth" / "DOB" labels
       const dobSection = fullText.match(/(?:date\s*of\s*birth|d\.?o\.?b|birth\s*date|born)[^0-9]*(\d{1,2}[\s./,-]*[A-Za-z]{3,10}[\s./,-]*\d{4})/i);
       if (dobSection) {
         const dateStr = dobSection[1];
@@ -375,7 +332,6 @@ export class AIAssistantService {
         }
       }
 
-      // Also try numeric format: "27/06/1999" or "1999-06-27"
       if (!result.dob) {
         const numericDob = fullText.match(/(?:date\s*of\s*birth|d\.?o\.?b|birth)[^0-9]*(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/i);
         if (numericDob) {
@@ -386,21 +342,6 @@ export class AIAssistantService {
 
     // -- Date of Expiry --
     if (!result.expiryDate) {
-      const months: Record<string, string> = {
-        'JAN': '01', 'JANUARY': '01',
-        'FEB': '02', 'FEBRUARY': '02',
-        'MAR': '03', 'MARCH': '03',
-        'APR': '04', 'APRIL': '04',
-        'MAY': '05',
-        'JUN': '06', 'JUNE': '06',
-        'JUL': '07', 'JULY': '07',
-        'AUG': '08', 'AUGUST': '08',
-        'SEP': '09', 'SEPTEMBER': '09',
-        'OCT': '10', 'OCTOBER': '10',
-        'NOV': '11', 'NOVEMBER': '11',
-        'DEC': '12', 'DECEMBER': '12',
-      };
-
       const expirySection = fullText.match(/(?:date\s*of\s*expiry|expiry|valid\s*until|expires?)[^0-9]*(\d{1,2}[\s./,-]*[A-Za-z]{3,10}[\s./,-]*\d{4})/i);
       if (expirySection) {
         const dateStr = expirySection[1];
@@ -419,12 +360,8 @@ export class AIAssistantService {
       }
     }
 
-    // -- Date of Issue (for reference, also try to extract) --
-    // Skip this for now, not needed for form fill
-
     // -- Nationality --
     if (!result.nationality) {
-      // Direct text matching for common nationalities
       if (/NEPALESE/i.test(fullText) || /NEPALI/i.test(fullText)) result.nationality = 'Nepali';
       else if (/INDIAN/i.test(fullText)) result.nationality = 'Indian';
       else if (/PAKISTANI/i.test(fullText)) result.nationality = 'Pakistani';
@@ -433,7 +370,6 @@ export class AIAssistantService {
       else if (/SRI\s*LANKAN/i.test(fullText)) result.nationality = 'Sri Lankan';
       else if (/INDONESIAN/i.test(fullText)) result.nationality = 'Indonesian';
       else {
-        // Try to find nationality label
         const natMatch = fullText.match(/(?:nationality|nationalit)[^A-Z]*([A-Z][A-Z\s]{3,20}?)(?:\s*[^A-Z]|$)/i);
         if (natMatch) {
           const cleaned = natMatch[1].replace(/[^A-Za-z\s]/g, '').trim();
@@ -447,13 +383,22 @@ export class AIAssistantService {
     // -- Place of Birth --
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
-      // Place of birth check: line has "birth" or "place" but not "date" or "dob"
-      if (/birth|place|hace/i.test(line) && !/date|dob|issue|expiry/i.test(line)) {
-        if (i + 1 < lines.length) {
+      if (/place\s*of\s*birth|lieu\s*de\s*naissance|birth\s*place|lieu\s*de/i.test(line)) {
+        const afterLabel = line.replace(/^.*?(?:place\s*of\s*birth|lieu\s*de\s*naissance|birth\s*place|lieu\s*de)[^A-Z]*/i, '').trim();
+        const afterParts = afterLabel.split(/[\s|/\\:.-]+/).map(p => p.trim()).filter(Boolean);
+        let found = false;
+        for (const part of afterParts) {
+          if (/^[A-Z]{3,30}$/.test(part) && !/SEX|MALE|FEMALE|TYPE|CODE|AUTHORITY|PASSPORT|NEPAL/i.test(part)) {
+            result.placeOfBirth = part;
+            found = true;
+            break;
+          }
+        }
+        if (!found && i + 1 < lines.length) {
           const nextLine = lines[i + 1];
-          const parts = nextLine.split(/[\s|/\\:.-]+/).map(p => p.trim()).filter(Boolean);
-          for (const part of parts) {
-            if (/^[A-Z]{3,30}$/.test(part) && !/SEX|MALE|FEMALE|TYPE|CODE|AUTHORITY/i.test(part)) {
+          const nextParts = nextLine.split(/[\s|/\\:.-]+/).map(p => p.trim()).filter(Boolean);
+          for (const part of nextParts) {
+            if (/^[A-Z]{3,30}$/.test(part) && !/SEX|MALE|FEMALE|TYPE|CODE|AUTHORITY|PASSPORT|NEPAL/i.test(part)) {
               result.placeOfBirth = part;
               break;
             }
@@ -463,102 +408,77 @@ export class AIAssistantService {
     }
 
     // ======================================================================
-    // 3. Fallback: Extract ALL dates from text and assign by context
+    // 3. Fallback Chronological Date Classification
     // ======================================================================
     if (!result.dob || !result.expiryDate) {
-      const months: Record<string, string> = {
-        'JAN': '01', 'JANUARY': '01',
-        'FEB': '02', 'FEBRUARY': '02',
-        'MAR': '03', 'MARCH': '03',
-        'APR': '04', 'APRIL': '04',
-        'MAY': '05',
-        'JUN': '06', 'JUNE': '06',
-        'JUL': '07', 'JULY': '07',
-        'AUG': '08', 'AUGUST': '08',
-        'SEP': '09', 'SEPTEMBER': '09',
-        'OCT': '10', 'OCTOBER': '10',
-        'NOV': '11', 'NOVEMBER': '11',
-        'DEC': '12', 'DECEMBER': '12',
-      };
+      const parsedDates: Array<{ dateStr: string; year: number }> = [];
 
-      // Find all "DD MON YYYY" dates
+      // Extract DD MON YYYY dates
       const allTextDates = [...fullText.matchAll(/(\d{1,2})[\s./,-]*([A-Za-z]{3,10})[\s./,-]*(\d{4})/gi)];
-      const parsedDates = allTextDates.map(m => {
+      for (const m of allTextDates) {
         const mm = months[m[2].toUpperCase()];
-        if (!mm) return null;
-        const year = parseInt(m[3]);
-        const dateStr = `${m[3]}-${mm}-${m[1].padStart(2, '0')}`;
-        return { dateStr, year };
-      }).filter(Boolean) as { dateStr: string; year: number }[];
+        if (mm) {
+          parsedDates.push({
+            dateStr: `${m[3]}-${mm}-${m[1].padStart(2, '0')}`,
+            year: parseInt(m[3])
+          });
+        }
+      }
+
+      // Extract numeric dates (DD/MM/YYYY or YYYY-MM-DD)
+      const allNumericDates = [...fullText.matchAll(/\b(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})\b|\b(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})\b/g)];
+      for (const m of allNumericDates) {
+        if (m[1] && m[2] && m[3]) {
+          const day = parseInt(m[1]);
+          const month = parseInt(m[2]);
+          const year = parseInt(m[3]);
+          if (month >= 1 && month <= 12 && day >= 1 && day <= 31 && year >= 1930 && year <= 2050) {
+            parsedDates.push({
+              dateStr: `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`,
+              year
+            });
+          }
+        } else if (m[4] && m[5] && m[6]) {
+          const year = parseInt(m[4]);
+          const month = parseInt(m[5]);
+          const day = parseInt(m[6]);
+          if (month >= 1 && month <= 12 && day >= 1 && day <= 31 && year >= 1930 && year <= 2050) {
+            parsedDates.push({
+              dateStr: `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`,
+              year
+            });
+          }
+        }
+      }
 
       if (parsedDates.length >= 1) {
-        let dob = '';
-        let issueDate = '';
-        let expiryDate = '';
-        const currentYear = new Date().getFullYear();
+        // Remove duplicate dates
+        const uniqueDates = parsedDates.filter((v, i, a) => a.findIndex(t => t.dateStr === v.dateStr) === i);
+        // Sort chronologically
+        uniqueDates.sort((a, b) => a.year - b.year);
 
-        for (const d of parsedDates) {
-          const age = currentYear - d.year;
-          if (age >= 10 && age <= 100 && d.year < currentYear - 5) {
-            if (!dob || d.year < new Date(dob).getFullYear()) {
-              dob = d.dateStr;
-            }
-          } else if (d.year >= 2000 && d.year <= currentYear + 1) {
-            issueDate = d.dateStr;
-          } else if (d.year > currentYear - 5 && d.year <= currentYear + 15) {
-            expiryDate = d.dateStr;
+        if (uniqueDates.length === 1) {
+          const d = uniqueDates[0];
+          if (d.year > new Date().getFullYear()) {
+            if (!result.expiryDate) result.expiryDate = d.dateStr;
+          } else {
+            if (!result.dob) result.dob = d.dateStr;
           }
-        }
-
-        if (dob) result.dob = dob;
-        if (expiryDate) result.expiryDate = expiryDate;
-
-        // Calculate expiry date if it is missing but we have issueDate (10 years - 1 day)
-        if (!result.expiryDate && issueDate) {
-          try {
-            const issueDateTime = new Date(issueDate);
-            const expiryDateTime = new Date(issueDateTime);
-            expiryDateTime.setFullYear(issueDateTime.getFullYear() + 10);
-            expiryDateTime.setDate(expiryDateTime.getDate() - 1);
-            result.expiryDate = expiryDateTime.toISOString().split('T')[0];
-          } catch (e) {
-            // ignore
-          }
-        }
-
-        // If still missing, chronological fallback
-        if (!result.dob || !result.expiryDate) {
-          parsedDates.sort((a, b) => a.year - b.year);
-          if (!result.dob) result.dob = parsedDates[0].dateStr;
-          if (!result.expiryDate && parsedDates.length >= 2) {
-            result.expiryDate = parsedDates[parsedDates.length - 1].dateStr;
-          }
+        } else if (uniqueDates.length === 2) {
+          if (!result.dob) result.dob = uniqueDates[0].dateStr;
+          if (!result.expiryDate) result.expiryDate = uniqueDates[1].dateStr;
+        } else if (uniqueDates.length >= 3) {
+          if (!result.dob) result.dob = uniqueDates[0].dateStr;
+          if (!result.expiryDate) result.expiryDate = uniqueDates[uniqueDates.length - 1].dateStr;
         }
       }
     }
 
-    // ======================================================================
-    // 4. Fallback: Also try numeric date patterns
-    // ======================================================================
-    if (!result.dob || !result.expiryDate) {
-      const numericDates = [...fullText.matchAll(/\b((?:19|20)\d{2})[-/.](0[1-9]|1[0-2])[-/.](0[1-9]|[12]\d|3[01])\b/g)];
-      const numericDates2 = [...fullText.matchAll(/\b(0[1-9]|[12]\d|3[01])[-/.](0[1-9]|1[0-2])[-/.]((?:19|20)\d{2})\b/g)];
-
-      const allNumDates = [
-        ...numericDates.map(m => `${m[1]}-${m[2]}-${m[3]}`),
-        ...numericDates2.map(m => `${m[3]}-${m[2]}-${m[1]}`),
-      ];
-
-      if (allNumDates.length >= 1 && !result.dob) result.dob = allNumDates[0];
-      if (allNumDates.length >= 2 && !result.expiryDate) result.expiryDate = allNumDates[allNumDates.length - 1];
-    }
-
-    // Clean up all fields from trailing/leading noise characters (pipes, hyphens, slashes, numbers, etc.)
     const cleanField = (val: string) => {
       if (!val) return '';
       return val
-        .replace(/^[\s-~|/\\_.,]+|[\s-~|/\\_.,]+$/g, '') // Strip leading/trailing symbols
-        .replace(/\s+/g, ' ')                           // Normalize spacing
+        .replace(/^[\s-~|/\\_.,]+|[\s-~|/\\_.,]+$/g, '')
+        .replace(/\s+/g, ' ')
         .trim();
     };
 
